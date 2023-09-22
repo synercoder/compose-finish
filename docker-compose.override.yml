@@ -1,0 +1,83 @@
+version: '3.7'
+
+services:
+  reverse.proxy:
+    volumes:
+      - ${COMPOSE_VOLUME_ROOT}\caddy:/data
+
+  sqldata:
+    image: mcr.microsoft.com/mssql/server:2022-latest 
+    restart: unless-stopped
+    networks:
+      - caddy
+    environment:
+      - MSSQL_SA_PASSWORD=Pass@word
+      - ACCEPT_EULA=Y
+      - MSSQL_PID=Developer
+    volumes:
+      - ${COMPOSE_VOLUME_ROOT}\sql\data:/var/opt/mssql/data 
+      - ${COMPOSE_VOLUME_ROOT}\sql\log:/var/opt/mssql/log
+      - ${COMPOSE_VOLUME_ROOT}\sql\secrets:/var/opt/mssql/secrets
+
+  seq:
+    image: datalust/seq:latest
+    networks:
+      - caddy
+    environment:
+      - ACCEPT_EULA=Y
+    labels:
+      caddy: logging.${COMPOSE_DOMAIN}
+      caddy.reverse_proxy: "{{upstreams}}"
+      caddy.tls: "${CADDY_TLS}"
+
+  compose.api:
+    build:
+      context: .
+      dockerfile: ComposeExample.Api/Dockerfile
+    ports:
+      - "80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
+      - ASPNETCORE_URLS=http://+:80
+      - Serilog__WriteTo__SeqSink__Name=Seq
+      - Serilog__WriteTo__SeqSink__Args__serverUrl=http://seq:5341/
+      - Serilog__WriteTo__SeqSink__Args__restrictedToMinimumLevel=Debug
+    depends_on:
+      - sqldata
+      - seq
+
+  compose.web:
+    build:
+      context: .
+      dockerfile: ComposeExample.Web/Dockerfile
+    ports:
+      - "80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
+      - ASPNETCORE_URLS=http://+:80
+      - Serilog__WriteTo__SeqSink__Name=Seq
+      - Serilog__WriteTo__SeqSink__Args__serverUrl=http://seq:5341/
+      - Serilog__WriteTo__SeqSink__Args__restrictedToMinimumLevel=Debug
+      - KnownUrls__Web=https://www.${COMPOSE_DOMAIN}
+      - KnownUrls__Manage=https://manage.${COMPOSE_DOMAIN}
+      - KnownUrls__Api=http://compose.api
+    depends_on:
+      - seq
+
+  compose.manage:
+    build:
+      context: .
+      dockerfile: ComposeExample.Manage/Dockerfile
+    ports:
+      - "80"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
+      - ASPNETCORE_URLS=http://+:80
+      - Serilog__WriteTo__SeqSink__Name=Seq
+      - Serilog__WriteTo__SeqSink__Args__serverUrl=http://seq:5341/
+      - Serilog__WriteTo__SeqSink__Args__restrictedToMinimumLevel=Debug
+      - KnownUrls__Web=https://www.${COMPOSE_DOMAIN}
+      - KnownUrls__Manage=https://manage.${COMPOSE_DOMAIN}
+      - KnownUrls__Api=http://compose.api
+    depends_on:
+      - seq

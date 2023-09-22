@@ -1,0 +1,58 @@
+version: '3.7'
+
+services:
+  reverse.proxy:
+    image: lucaslorentz/caddy-docker-proxy:2.8.3
+    restart: unless-stopped
+    environment:
+      - CADDY_INGRESS_NETWORKS=caddy
+    networks:
+      - caddy
+    ports:
+      - 80:80
+      - 443:443
+    depends_on:
+      - compose.web
+      - compose.manage
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  compose.api:
+    image: ${DOCKER_REGISTRY-}composeapi
+    networks:
+      - caddy
+    restart: unless-stopped
+    environment:
+      - ConnectionStrings__SqlConnection=${COMPOSE_API_DB}
+      
+  compose.web:
+    image: ${DOCKER_REGISTRY-}composeweb
+    networks:
+      - caddy
+    restart: unless-stopped
+    depends_on:
+      - compose.api
+    labels:
+      caddy_0: ${COMPOSE_DOMAIN}
+      caddy_0.redir: https://www.${COMPOSE_DOMAIN}{uri}
+      caddy_0.tls: "${CADDY_TLS}"
+      caddy_1: www.${COMPOSE_DOMAIN}
+      caddy_1.reverse_proxy: "{{upstreams}}"
+      caddy_1.tls: "${CADDY_TLS}"
+
+  compose.manage:
+    image: ${DOCKER_REGISTRY-}composemanage
+    networks:
+      - caddy
+    restart: unless-stopped
+    depends_on:
+      - compose.api
+    labels:
+      caddy: manage.${COMPOSE_DOMAIN}
+      caddy.reverse_proxy: "{{upstreams}}"
+      caddy.tls: "${CADDY_TLS}"
+
+networks:
+  caddy:
+    name: caddy
+    driver: bridge
